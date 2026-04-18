@@ -41,7 +41,12 @@ export async function setupWebDavPushInBrowser(
   await davClient.login();
 
   const pushClient = new WebDavPushClient(createTsdavRequester(davClient));
-  const capabilities = await pushClient.discoverCapabilities(resourceUrl);
+  const capabilitiesResult = await pushClient.discoverCapabilities(resourceUrl);
+  if (!capabilitiesResult.ok) {
+    throw capabilitiesResult.error;
+  }
+
+  const capabilities = capabilitiesResult.value;
   const webPushTransport = capabilities.transports.find(
     (item) => item.id === "web-push",
   );
@@ -75,7 +80,7 @@ export async function setupWebDavPushInBrowser(
     earlyRefreshMs: 1000 * 60 * 60 * 12,
   });
 
-  await renewalManager.registerAndSchedule({
+  const registrationResult = await renewalManager.registerAndSchedule({
     resourceUrl,
     pushResource: browserSubscription.endpoint,
     subscriptionPublicKey: p256dh,
@@ -85,4 +90,8 @@ export async function setupWebDavPushInBrowser(
       propertyUpdate: { depth: "0" },
     },
   });
+
+  if (!registrationResult.ok) {
+    throw registrationResult.error;
+  }
 }

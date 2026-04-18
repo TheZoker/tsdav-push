@@ -242,18 +242,43 @@ function parsePushProperties(xml: string): {
   transports: PushTransportInfo[];
   topic?: string;
   supportedTriggers: SupportedTrigger[];
+  metadata: {
+    hasMultistatus: boolean;
+    hasResponse: boolean;
+    hasOkPropstat: boolean;
+    hasPushPropertyNode: boolean;
+  };
 } {
   const parsed = parser.parse(xml);
+  const responses = asArray(parsed?.multistatus?.response);
+  const okPropstats = responses
+    .flatMap((response) => asArray(response?.propstat))
+    .filter((propstat) => String(propstat?.status ?? "").includes(" 200 "));
   const prop = normalizePushProperties(parsed);
 
   if (!prop) {
-    return { transports: [], supportedTriggers: [] };
+    return {
+      transports: [],
+      supportedTriggers: [],
+      metadata: {
+        hasMultistatus: Boolean(parsed?.multistatus),
+        hasResponse: responses.length > 0,
+        hasOkPropstat: okPropstats.length > 0,
+        hasPushPropertyNode: false,
+      },
+    };
   }
 
   return {
     transports: parseTransports(prop),
     topic: parsePushTopic(prop),
     supportedTriggers: parseSupportedTriggers(prop["supported-triggers"]),
+    metadata: {
+      hasMultistatus: Boolean(parsed?.multistatus),
+      hasResponse: responses.length > 0,
+      hasOkPropstat: okPropstats.length > 0,
+      hasPushPropertyNode: true,
+    },
   };
 }
 
@@ -318,6 +343,12 @@ export function parsePushPropertiesFromMultistatus(xml: string): {
   transports: PushTransportInfo[];
   topic?: string;
   supportedTriggers: SupportedTrigger[];
+  metadata: {
+    hasMultistatus: boolean;
+    hasResponse: boolean;
+    hasOkPropstat: boolean;
+    hasPushPropertyNode: boolean;
+  };
 } {
   return parsePushProperties(xml);
 }

@@ -1,3 +1,5 @@
+import type { WebDavPushError } from "./errors.js";
+
 export type DavDepth = "0" | "1" | "infinity";
 
 export type PushTransportId = "web-push" | string;
@@ -21,6 +23,11 @@ export interface WebDavPushCapabilities {
   topic?: string;
   supportedTriggers: SupportedTrigger[];
   rawDavHeader?: string;
+  webPush: {
+    available: boolean;
+    hasVapidPublicKey: boolean;
+    missingVapidPublicKey: boolean;
+  };
 }
 
 export interface RegisterWebPushSubscriptionInput {
@@ -50,6 +57,13 @@ export interface RegisterWebPushSubscriptionResult {
 export interface UnregisterResult {
   status: number;
   removed: boolean;
+  reason:
+    | "removed"
+    | "already-missing"
+    | "unauthorized"
+    | "server-error"
+    | "unexpected-status"
+    | "transport-error";
 }
 
 export interface PushMessage {
@@ -67,13 +81,17 @@ export interface RawHttpResponse {
   bodyText: string;
 }
 
+export interface RawHttpRequest {
+  url: string;
+  method: string;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export interface RawHttpRequester {
-  request(input: {
-    url: string;
-    method: string;
-    headers?: Record<string, string>;
-    body?: string;
-  }): Promise<RawHttpResponse>;
+  request(input: RawHttpRequest): Promise<RawHttpResponse>;
 }
 
 export interface TsdavLikeClient {
@@ -84,4 +102,39 @@ export interface TsdavLikeClient {
 
 export interface RenewalManagerOptions {
   earlyRefreshMs?: number;
+  retry?: RetryOptions;
+  onRenewalSuccess?: (result: RegisterWebPushSubscriptionResult) => void;
+  onRenewalFailure?: (error: WebDavPushError) => void;
+  onNextAttemptScheduled?: (nextAttemptAt: Date) => void;
 }
+
+export interface RegisterResponsePolicy {
+  isSuccessStatus(status: number): boolean;
+  requiresLocationOnSuccess: boolean;
+}
+
+export interface UnregisterResponsePolicy {
+  isRemovedStatus(status: number): boolean;
+  isAlreadyMissingStatus(status: number): boolean;
+}
+
+export interface ClientOptions {
+  defaultHeaders?: Record<string, string>;
+  strictMode?: boolean;
+  parseDiagnostics?: boolean;
+  registerPolicy?: Partial<RegisterResponsePolicy>;
+  unregisterPolicy?: Partial<UnregisterResponsePolicy>;
+}
+
+export interface RetryOptions {
+  maxAttempts?: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  jitterRatio?: number;
+  seed?: number;
+  shouldRetry?: (error: unknown) => boolean;
+}
+
+export type WebDavPushResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: WebDavPushError };

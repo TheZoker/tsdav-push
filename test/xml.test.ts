@@ -60,4 +60,26 @@ describe("xml helpers", () => {
       { namespace: "urn:custom", name: "color" },
     ]);
   });
+
+  it("parses namespace variations and ignores unknown elements", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<p:push-message xmlns:p="https://bitfire.at/webdav-push" xmlns:d="DAV:">
+  <p:topic>topic-x</p:topic>
+  <p:unknown>ignored</p:unknown>
+  <p:content-update>
+    <d:sync-token>sync-1</d:sync-token>
+  </p:content-update>
+</p:push-message>`;
+
+    const parsed = parsePushMessage(xml);
+
+    expect(parsed.topic).toBe("topic-x");
+    expect(parsed.hasContentUpdate).toBe(true);
+    expect(parsed.hasPropertyUpdate).toBe(false);
+    expect(parsed.changedProperties).toEqual([]);
+  });
+
+  it("throws on malformed push payload XML", () => {
+    expect(() => parsePushMessage("<p:push-message><broken")).toThrow();
+  });
 });

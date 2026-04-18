@@ -1,4 +1,9 @@
-import { RawHttpRequester, RawHttpResponse, TsdavLikeClient } from "./types.js";
+import {
+  RawHttpRequest,
+  RawHttpRequester,
+  RawHttpResponse,
+  TsdavLikeClient,
+} from "./types.js";
 
 const REQUIRED_FETCH_ERROR =
   "No fetch implementation available. Pass one explicitly or provide a global fetch.";
@@ -21,6 +26,49 @@ function mergeHeaders(
   };
 }
 
+function withTimeout(request: RawHttpRequest): {
+  signal: AbortSignal | undefined;
+  cleanup: () => void;
+} {
+  if (!request.timeoutMs) {
+    return {
+      signal: request.signal,
+      cleanup: () => {
+        return;
+      },
+    };
+  }
+
+  const timeoutController = new AbortController();
+  const timer = setTimeout(() => {
+    timeoutController.abort();
+  }, request.timeoutMs);
+
+  if (!request.signal) {
+    return {
+      signal: timeoutController.signal,
+      cleanup: () => {
+        clearTimeout(timer);
+      },
+    };
+  }
+
+  if (request.signal.aborted) {
+    timeoutController.abort();
+  } else {
+    request.signal.addEventListener("abort", () => timeoutController.abort(), {
+      once: true,
+    });
+  }
+
+  return {
+    signal: timeoutController.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+    },
+  };
+}
+
 export function createFetchRequester(options?: {
   fetch?: typeof fetch;
   defaultHeaders?: Record<string, string>;
@@ -31,22 +79,28 @@ export function createFetchRequester(options?: {
   const defaultRequestInit = options?.defaultRequestInit;
 
   return {
-    async request(input): Promise<RawHttpResponse> {
+    async request(input: RawHttpRequest): Promise<RawHttpResponse> {
       const mergedHeaders = mergeHeaders(defaultHeaders, input.headers);
+      const signalState = withTimeout(input);
 
-      const response = await requestFetch(input.url, {
-        ...(defaultRequestInit ?? {}),
-        method: input.method,
-        headers: mergedHeaders,
-        body: input.body,
-      });
+      try {
+        const response = await requestFetch(input.url, {
+          ...(defaultRequestInit ?? {}),
+          method: input.method,
+          headers: mergedHeaders,
+          body: input.body,
+          signal: signalState.signal,
+        });
 
-      return {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        bodyText: await response.text(),
-      };
+        return {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+          bodyText: await response.text(),
+        };
+      } finally {
+        signalState.cleanup();
+      }
     },
   };
 }

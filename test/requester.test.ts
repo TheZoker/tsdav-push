@@ -59,6 +59,29 @@ describe("createFetchRequester", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe("payload");
   });
+
+  it("forwards abort signal and timeout", async () => {
+    const response = new Response("ok", { status: 200 });
+    const fetchMock = vi.fn<
+      (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+    >(async () => response);
+
+    const requester = createFetchRequester({
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    const controller = new AbortController();
+
+    await requester.request({
+      url: "https://example.com/dav",
+      method: "OPTIONS",
+      signal: controller.signal,
+      timeoutMs: 500,
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBeDefined();
+  });
 });
 
 describe("createTsdavRequester", () => {
