@@ -275,6 +275,31 @@ describe("WebDavPushClient", () => {
     expect(result.error).toBeInstanceOf(TransportError);
   });
 
+  it("returns HttpStatusError for unregister 5xx in strict mode", async () => {
+    const request = vi.fn<RawHttpRequester["request"]>().mockResolvedValue({
+      status: 503,
+      statusText: "Service Unavailable",
+      headers: makeHeaders({}),
+      bodyText: "temporary outage",
+    });
+
+    const client = new WebDavPushClient(
+      { request },
+      {
+        strictUnregisterErrors: true,
+      },
+    );
+
+    const result = await client.unregister("https://example.com/sub/1");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("Expected unregister strict-mode failure.");
+    }
+
+    expect(result.error).toBeInstanceOf(HttpStatusError);
+  });
+
   it("builds Push-Dont-Notify value", () => {
     const client = new WebDavPushClient({
       request: vi.fn<RawHttpRequester["request"]>(),
@@ -321,5 +346,25 @@ describe("WebDavPushClient", () => {
       throw new Error("Expected parsePushMessage failure.");
     }
     expect(parsed.error).toBeInstanceOf(XmlParseError);
+  });
+
+  it("returns protocol validation error for semantically invalid payload in strict payload mode", () => {
+    const client = new WebDavPushClient(
+      {
+        request: vi.fn<RawHttpRequester["request"]>(),
+      },
+      {
+        strictPayloadMode: true,
+      },
+    );
+
+    const parsed = client.parsePushMessage(
+      `<?xml version="1.0" encoding="utf-8"?><root><anything/></root>`,
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) {
+      throw new Error("Expected strict payload mode to fail.");
+    }
+    expect(parsed.error).toBeInstanceOf(ProtocolValidationError);
   });
 });

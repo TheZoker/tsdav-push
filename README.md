@@ -193,17 +193,22 @@ The helper validates illegal input to prevent header injection patterns.
 - returns categorized result for known statuses
 - maps to reason categories: `removed`, `already-missing`, `unauthorized`, `server-error`, `unexpected-status`
 - transport failures return typed `TransportError`
+- optional `strictUnregisterErrors` mode maps 401/403/5xx/unexpected statuses to `HttpStatusError`
 
 ## Strict and Diagnostics Modes
 
 `WebDavPushClient` supports:
 
 - `strictMode` (default `true`): enforce required DAV response structure
+- `strictPayloadMode` (default `false`): require semantic payload shape (`push-message` root and known update node)
+- `strictUnregisterErrors` (default `false`): convert non-removal unregister statuses into typed errors
 - `parseDiagnostics` (default `false`): include parser shape diagnostics in protocol validation messages
 
 ```ts
 const pushClient = new WebDavPushClient(requester, {
   strictMode: true,
+  strictPayloadMode: true,
+  strictUnregisterErrors: true,
   parseDiagnostics: true,
 });
 ```
@@ -296,6 +301,12 @@ The project includes Vitest unit tests for:
 - retry behavior (including deterministic seeded jitter and Retry-After)
 - renewal manager lifecycle behavior
 - status/error classification paths
+
+Contract-style fixture tests are included for:
+
+- Nextcloud-like discovery response variants
+- Rustical-like partial discovery responses
+- malformed/partial multistatus strict vs permissive behavior
 
 Run tests with:
 

@@ -11,7 +11,7 @@ import {
 import {
   buildPushPropertiesPropfindBody,
   buildRegisterBody,
-  parsePushMessage,
+  parsePushMessageWithMetadata,
   parsePushPropertiesFromMultistatus,
 } from "./xml.js";
 import {
@@ -44,6 +44,8 @@ function isClientOptions(
   return (
     "defaultHeaders" in value ||
     "strictMode" in value ||
+    "strictPayloadMode" in value ||
+    "strictUnregisterErrors" in value ||
     "parseDiagnostics" in value ||
     "registerPolicy" in value ||
     "unregisterPolicy" in value
@@ -415,6 +417,22 @@ export class WebDavPushClient {
     }
 
     if (response.status === 401 || response.status === 403) {
+      if (this.options?.strictUnregisterErrors) {
+        return {
+          ok: false,
+          error: new HttpStatusError(
+            `Unregister returned unauthorized status ${response.status}.`,
+            {
+              operation: "unregister",
+              status: response.status,
+              retryable: false,
+              bodySnippet: truncateBodySnippet(response.bodyText),
+              headersSnapshot: headersToSnapshot(response.headers),
+            },
+          ),
+        };
+      }
+
       return {
         ok: true,
         value: {
@@ -426,6 +444,22 @@ export class WebDavPushClient {
     }
 
     if (response.status >= 500 && response.status <= 599) {
+      if (this.options?.strictUnregisterErrors) {
+        return {
+          ok: false,
+          error: new HttpStatusError(
+            `Unregister returned server error status ${response.status}.`,
+            {
+              operation: "unregister",
+              status: response.status,
+              retryable: true,
+              bodySnippet: truncateBodySnippet(response.bodyText),
+              headersSnapshot: headersToSnapshot(response.headers),
+            },
+          ),
+        };
+      }
+
       return {
         ok: true,
         value: {
@@ -433,6 +467,22 @@ export class WebDavPushClient {
           removed: false,
           reason: "server-error",
         },
+      };
+    }
+
+    if (this.options?.strictUnregisterErrors) {
+      return {
+        ok: false,
+        error: new HttpStatusError(
+          `Unregister returned unexpected status ${response.status}.`,
+          {
+            operation: "unregister",
+            status: response.status,
+            retryable: isRetryableStatus(response.status),
+            bodySnippet: truncateBodySnippet(response.bodyText),
+            headersSnapshot: headersToSnapshot(response.headers),
+          },
+        ),
       };
     }
 
@@ -448,9 +498,29 @@ export class WebDavPushClient {
 
   parsePushMessage(xml: string): WebDavPushResult<PushMessage> {
     try {
+      const parsed = parsePushMessageWithMetadata(xml);
+      if (
+        this.options?.strictPayloadMode &&
+        (!parsed.metadata.hasPushMessageRoot ||
+          !parsed.metadata.hasKnownUpdateNode)
+      ) {
+        return {
+          ok: false,
+          error: new ProtocolValidationError(
+            "push-message payload is semantically invalid for strict payload mode.",
+            {
+              operation: "parsePushMessage",
+              retryable: false,
+              headersSnapshot: {},
+              bodySnippet: truncateBodySnippet(xml),
+            },
+          ),
+        };
+      }
+
       return {
         ok: true,
-        value: parsePushMessage(xml),
+        value: parsed.message,
       };
     } catch {
       return {

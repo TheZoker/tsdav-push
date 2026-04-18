@@ -121,6 +121,8 @@ export interface UnregisterResponsePolicy {
 export interface ClientOptions {
   defaultHeaders?: Record<string, string>;
   strictMode?: boolean;
+  strictPayloadMode?: boolean;
+  strictUnregisterErrors?: boolean;
   parseDiagnostics?: boolean;
   registerPolicy?: Partial<RegisterResponsePolicy>;
   unregisterPolicy?: Partial<UnregisterResponsePolicy>;

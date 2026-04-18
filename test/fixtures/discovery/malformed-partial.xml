@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:p="https://bitfire.at/webdav-push">
+  <d:note>no response nodes</d:note>
+</d:multistatus>

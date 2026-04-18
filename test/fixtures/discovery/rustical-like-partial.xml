@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:p="https://bitfire.at/webdav-push">
+  <d:response>
+    <d:propstat>
+      <d:prop>
+        <p:transports>
+          <p:web-push />
+        </p:transports>
+        <p:topic>rustical-topic</p:topic>
+        <p:supported-triggers>
+          <p:content-update>
+            <d:depth>1</d:depth>
+          </p:content-update>
+        </p:supported-triggers>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>

@@ -305,6 +305,27 @@ function parsePushMessageFromXml(xml: string): PushMessage {
   };
 }
 
+function parsePushMessageDetailed(xml: string): {
+  message: PushMessage;
+  metadata: {
+    hasPushMessageRoot: boolean;
+    hasKnownUpdateNode: boolean;
+  };
+} {
+  const message = parsePushMessageFromXml(xml);
+  const parsed = parser.parse(xml);
+  const root = parsePushMessageRoot(parsed);
+  const hasPushMessageRoot = Boolean(root && typeof root === "object");
+
+  return {
+    message,
+    metadata: {
+      hasPushMessageRoot,
+      hasKnownUpdateNode: message.hasContentUpdate || message.hasPropertyUpdate,
+    },
+  };
+}
+
 function pickPushProp(multistatus: any): any | undefined {
   const responses = asArray(multistatus?.multistatus?.response);
   const okPropstats = responses
@@ -430,6 +451,16 @@ export function buildRegisterBody(input: {
 
 export function parsePushMessage(xml: string): PushMessage {
   return parsePushMessageFromXml(xml);
+}
+
+export function parsePushMessageWithMetadata(xml: string): {
+  message: PushMessage;
+  metadata: {
+    hasPushMessageRoot: boolean;
+    hasKnownUpdateNode: boolean;
+  };
+} {
+  return parsePushMessageDetailed(xml);
 }
 
 export function formatImfFixDate(date: Date): string {
