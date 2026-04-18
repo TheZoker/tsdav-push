@@ -14,8 +14,7 @@ const parser = new XMLParser({
   ignoreAttributes: false,
   removeNSPrefix: true,
   trimValues: true,
-  isArray: (name) =>
-    name === "response" || name === "propstat" || name === "prop",
+  isArray: (name) => name === "response" || name === "propstat",
 });
 
 function asArray<T>(value: T | T[] | undefined): T[] {
@@ -25,11 +24,260 @@ function asArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-function parseDepth(value: string | undefined): DavDepth | undefined {
-  if (value === "0" || value === "1" || value === "infinity") {
-    return value;
+function parseDepth(value: string | number | undefined): DavDepth | undefined {
+  const normalized = typeof value === "number" ? String(value) : value;
+
+  if (normalized === "0" || normalized === "1" || normalized === "infinity") {
+    return normalized;
   }
+
   return undefined;
+}
+
+function extractChangedPropertiesFromRawXml(
+  xml: string,
+): Array<{ namespace: string; name: string }> {
+  const namespaceMap = new Map<string, string>();
+  const xmlnsRegex = /xmlns:([A-Za-z_][\w.-]*)="([^"]+)"/g;
+  let xmlnsMatch: RegExpExecArray | null;
+  while ((xmlnsMatch = xmlnsRegex.exec(xml)) !== null) {
+    namespaceMap.set(xmlnsMatch[1], xmlnsMatch[2]);
+  }
+
+  const propBlockMatch = xml.match(
+    /<[^>]*property-update[^>]*>[\s\S]*?<[^>]*prop[^>]*>([\s\S]*?)<\/[^>]*prop>/i,
+  );
+  if (!propBlockMatch?.[1]) {
+    return [];
+  }
+
+  const result: Array<{ namespace: string; name: string }> = [];
+  const seen = new Set<string>();
+  const tagRegex = /<([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)(\s|\/|>)/g;
+  let tagMatch: RegExpExecArray | null;
+  while ((tagMatch = tagRegex.exec(propBlockMatch[1])) !== null) {
+    const prefix = tagMatch[1];
+    const name = tagMatch[2];
+    if (prefix === "d" || prefix === "p") {
+      continue;
+    }
+
+    const namespace = namespaceMap.get(prefix) ?? "";
+    const key = `${namespace}:${name}`;
+    if (!seen.has(key)) {
+      result.push({ namespace, name });
+      seen.add(key);
+    }
+  }
+
+  return result;
+}
+
+function parseDepthFromTriggerNode(node: any): DavDepth | undefined {
+  if (!node || typeof node !== "object") {
+    return undefined;
+  }
+
+  return parseDepth(node.depth);
+}
+
+function parseSupportedTriggers(triggerNode: any): SupportedTrigger[] {
+  const triggers: SupportedTrigger[] = [];
+
+  const contentDepth = parseDepthFromTriggerNode(
+    triggerNode?.["content-update"],
+  );
+  if (contentDepth) {
+    triggers.push({ type: "content-update", depth: contentDepth });
+  }
+
+  const propertyDepth = parseDepthFromTriggerNode(
+    triggerNode?.["property-update"],
+  );
+  if (propertyDepth) {
+    triggers.push({ type: "property-update", depth: propertyDepth });
+  }
+
+  return triggers;
+}
+
+function normalizeSupportedTriggersNode(triggerNode: any): any {
+  if (Array.isArray(triggerNode)) {
+    return triggerNode[0];
+  }
+
+  return triggerNode;
+}
+
+function normalizePropNode(propNode: any): any {
+  if (Array.isArray(propNode)) {
+    return propNode[0];
+  }
+
+  return propNode;
+}
+
+function normalizePushProperties(parsed: any): any | undefined {
+  const prop = pickPushProp(parsed);
+  if (!prop || typeof prop !== "object") {
+    return undefined;
+  }
+
+  return {
+    ...prop,
+    "supported-triggers": normalizeSupportedTriggersNode(
+      prop["supported-triggers"],
+    ),
+  };
+}
+
+function normalizePushMessageRoot(root: any): any {
+  if (!root || typeof root !== "object") {
+    return root;
+  }
+
+  return {
+    ...root,
+    "property-update": root["property-update"]
+      ? {
+          ...root["property-update"],
+          prop: normalizePropNode(root["property-update"].prop),
+        }
+      : root["property-update"],
+  };
+}
+
+function parsePushMessageRoot(parsed: any): any {
+  return normalizePushMessageRoot(
+    parsed?.["push-message"] ??
+      parsed?.["p:push-message"] ??
+      parsed?.pushMessage,
+  );
+}
+
+function parseChangedProperties(
+  root: any,
+  xml: string,
+): Array<{ namespace: string; name: string }> {
+  const fromRawXml = extractChangedPropertiesFromRawXml(xml);
+  if (fromRawXml.length > 0) {
+    return fromRawXml;
+  }
+
+  const changedProperties: Array<{ namespace: string; name: string }> = [];
+  const propNode = root?.["property-update"]?.prop;
+
+  if (propNode && typeof propNode === "object") {
+    for (const [name, value] of Object.entries(propNode)) {
+      if (name.startsWith("@_")) {
+        continue;
+      }
+
+      const xmlValue = value as Record<string, unknown>;
+      const xmlnsEntry = Object.entries(xmlValue ?? {}).find(([key]) =>
+        key.startsWith("@_xmlns"),
+      );
+      const namespace =
+        typeof xmlnsEntry?.[1] === "string" ? (xmlnsEntry[1] as string) : "";
+
+      changedProperties.push({ namespace, name });
+    }
+  }
+
+  return changedProperties;
+}
+
+function parsePushTopic(prop: any): string | undefined {
+  return typeof prop.topic === "string" ? prop.topic : undefined;
+}
+
+function parseTransports(prop: any): PushTransportInfo[] {
+  const transportsValue = prop.transports;
+  const transportEntries: PushTransportInfo[] = [];
+
+  if (!transportsValue || typeof transportsValue !== "object") {
+    return transportEntries;
+  }
+
+  const keys = Object.keys(transportsValue);
+  for (const key of keys) {
+    const entry = transportsValue[key];
+    const transport: PushTransportInfo = { id: key };
+
+    if (key === "web-push" && entry && typeof entry === "object") {
+      const vapid = entry["vapid-public-key"];
+      if (typeof vapid === "string") {
+        transport.vapidPublicKey = { value: vapid };
+      } else if (vapid && typeof vapid === "object") {
+        transport.vapidPublicKey = {
+          value: vapid["#text"] ?? "",
+          type: vapid["@_type"],
+        };
+      }
+    }
+
+    transportEntries.push(transport);
+  }
+
+  return transportEntries;
+}
+
+function parseSyncToken(root: any): string | undefined {
+  return root?.["content-update"]?.["sync-token"];
+}
+
+function parseHasContentUpdate(root: any): boolean {
+  return Boolean(root?.["content-update"]);
+}
+
+function parseHasPropertyUpdate(root: any): boolean {
+  return Boolean(root?.["property-update"]);
+}
+
+function parsePushMessageTopic(root: any): string | undefined {
+  return typeof root?.topic === "string" ? root.topic : undefined;
+}
+
+function parsePushProperties(xml: string): {
+  transports: PushTransportInfo[];
+  topic?: string;
+  supportedTriggers: SupportedTrigger[];
+} {
+  const parsed = parser.parse(xml);
+  const prop = normalizePushProperties(parsed);
+
+  if (!prop) {
+    return { transports: [], supportedTriggers: [] };
+  }
+
+  return {
+    transports: parseTransports(prop),
+    topic: parsePushTopic(prop),
+    supportedTriggers: parseSupportedTriggers(prop["supported-triggers"]),
+  };
+}
+
+function parsePushMessageFromXml(xml: string): PushMessage {
+  const parsed = parser.parse(xml);
+  const root = parsePushMessageRoot(parsed);
+
+  if (!root || typeof root !== "object") {
+    return {
+      topic: undefined,
+      hasContentUpdate: false,
+      hasPropertyUpdate: false,
+      syncToken: undefined,
+      changedProperties: [],
+    };
+  }
+
+  return {
+    topic: parsePushMessageTopic(root),
+    hasContentUpdate: parseHasContentUpdate(root),
+    hasPropertyUpdate: parseHasPropertyUpdate(root),
+    syncToken: parseSyncToken(root),
+    changedProperties: parseChangedProperties(root, xml),
+  };
 }
 
 function pickPushProp(multistatus: any): any | undefined {
@@ -39,8 +287,13 @@ function pickPushProp(multistatus: any): any | undefined {
     .filter((propstat) => String(propstat?.status ?? "").includes(" 200 "));
 
   for (const propstat of okPropstats) {
-    const prop = propstat?.prop;
-    if (prop && (prop.transports || prop.topic || prop["supported-triggers"])) {
+    const rawProp = propstat?.prop;
+    const prop = Array.isArray(rawProp) ? rawProp[0] : rawProp;
+    if (
+      prop &&
+      typeof prop === "object" &&
+      (prop.transports || prop.topic || prop["supported-triggers"])
+    ) {
       return prop;
     }
   }
@@ -66,54 +319,7 @@ export function parsePushPropertiesFromMultistatus(xml: string): {
   topic?: string;
   supportedTriggers: SupportedTrigger[];
 } {
-  const parsed = parser.parse(xml);
-  const prop = pickPushProp(parsed);
-
-  if (!prop) {
-    return { transports: [], supportedTriggers: [] };
-  }
-
-  const transportsValue = prop.transports;
-  const transportEntries: PushTransportInfo[] = [];
-  if (transportsValue && typeof transportsValue === "object") {
-    const keys = Object.keys(transportsValue);
-    for (const key of keys) {
-      const entry = transportsValue[key];
-      const transport: PushTransportInfo = { id: key };
-      if (key === "web-push" && entry && typeof entry === "object") {
-        const vapid = entry["vapid-public-key"];
-        if (typeof vapid === "string") {
-          transport.vapidPublicKey = { value: vapid };
-        } else if (vapid && typeof vapid === "object") {
-          transport.vapidPublicKey = {
-            value: vapid["#text"] ?? "",
-            type: vapid["@_type"],
-          };
-        }
-      }
-      transportEntries.push(transport);
-    }
-  }
-
-  const triggers: SupportedTrigger[] = [];
-  const triggerNode = prop["supported-triggers"];
-  if (triggerNode && typeof triggerNode === "object") {
-    const contentDepth = parseDepth(triggerNode["content-update"]?.depth);
-    if (contentDepth) {
-      triggers.push({ type: "content-update", depth: contentDepth });
-    }
-
-    const propertyDepth = parseDepth(triggerNode["property-update"]?.depth);
-    if (propertyDepth) {
-      triggers.push({ type: "property-update", depth: propertyDepth });
-    }
-  }
-
-  return {
-    transports: transportEntries,
-    topic: typeof prop.topic === "string" ? prop.topic : undefined,
-    supportedTriggers: triggers,
-  };
+  return parsePushProperties(xml);
 }
 
 export function buildRegisterBody(input: {
@@ -192,44 +398,7 @@ export function buildRegisterBody(input: {
 }
 
 export function parsePushMessage(xml: string): PushMessage {
-  const parsed = parser.parse(xml);
-  const root =
-    parsed?.["push-message"] ??
-    parsed?.["p:push-message"] ??
-    parsed?.pushMessage;
-
-  if (!root || typeof root !== "object") {
-    return {
-      topic: undefined,
-      hasContentUpdate: false,
-      hasPropertyUpdate: false,
-      syncToken: undefined,
-      changedProperties: [],
-    };
-  }
-
-  const contentUpdate = root["content-update"];
-  const propertyUpdate = root["property-update"];
-
-  const changedProperties: Array<{ namespace: string; name: string }> = [];
-  const propNode = propertyUpdate?.prop;
-  if (propNode && typeof propNode === "object") {
-    for (const [name, value] of Object.entries(propNode)) {
-      const ns = (value as any)?.["@_xmlns"];
-      changedProperties.push({
-        namespace: typeof ns === "string" ? ns : "",
-        name,
-      });
-    }
-  }
-
-  return {
-    topic: typeof root.topic === "string" ? root.topic : undefined,
-    hasContentUpdate: Boolean(contentUpdate),
-    hasPropertyUpdate: Boolean(propertyUpdate),
-    syncToken: contentUpdate?.["sync-token"],
-    changedProperties,
-  };
+  return parsePushMessageFromXml(xml);
 }
 
 export function formatImfFixDate(date: Date): string {

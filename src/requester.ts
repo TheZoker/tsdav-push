@@ -32,11 +32,13 @@ export function createFetchRequester(options?: {
 
   return {
     async request(input): Promise<RawHttpResponse> {
+      const mergedHeaders = mergeHeaders(defaultHeaders, input.headers);
+
       const response = await requestFetch(input.url, {
-        method: input.method,
-        headers: mergeHeaders(defaultHeaders, input.headers),
-        body: input.body,
         ...(defaultRequestInit ?? {}),
+        method: input.method,
+        headers: mergedHeaders,
+        body: input.body,
       });
 
       return {

@@ -1,4 +1,4 @@
-# tsdav-webdav-push
+# tsdav-push
 
 WebDAV Push helper library for applications that already use [tsdav](https://github.com/natelindev/tsdav).
 
@@ -13,14 +13,23 @@ This package implements the client-side workflow needed by the current WebDAV Pu
 ## Installation
 
 ```bash
-npm install tsdav-webdav-push
+npm install tsdav-push
+```
+
+## Run Locally
+
+```bash
+npm install
+npm run typecheck
+npm run test
+npm run build
 ```
 
 ## Quick Start (with tsdav)
 
 ```ts
 import { DAVClient } from "tsdav";
-import { WebDavPushClient, createTsdavRequester } from "tsdav-webdav-push";
+import { WebDavPushClient, createTsdavRequester } from "tsdav-push";
 
 const davClient = new DAVClient({
   serverUrl: "https://example.com/remote.php/dav",
@@ -101,6 +110,56 @@ const headerValue = pushClient.buildPushDontNotifyHeaderValue([
 - `WebDavPushClient.parsePushMessage(xml)`
 - `WebDavPushClient.buildPushDontNotifyHeaderValue(urlsOrStar)`
 - `PushSubscriptionRenewalManager.registerAndSchedule(input)`
+
+## Browser + Service Worker
+
+See [examples/browser/README.md](examples/browser/README.md) for a full browser pattern with:
+
+- capability discovery + VAPID key usage
+- browser push subscription creation
+- WebDAV Push registration
+- service-worker push event forwarding
+
+Example files:
+
+- [examples/browser/app.ts](examples/browser/app.ts)
+- [examples/browser/service-worker.ts](examples/browser/service-worker.ts)
+
+## Testing
+
+The project includes Vitest unit tests for:
+
+- request wrapper behavior
+- capability discovery and registration flow
+- XML build/parse helpers
+
+Run tests with:
+
+```bash
+npm run test
+```
+
+## Publishing
+
+The `prepublishOnly` script runs a full verification pipeline before publish:
+
+- clean output
+- typecheck
+- tests
+- build
+
+Publish when ready:
+
+```bash
+npm publish
+```
+
+For GitHub Actions based publishing, workflows are included:
+
+- [ci.yml](.github/workflows/ci.yml)
+- [publish.yml](.github/workflows/publish.yml)
+
+To enable workflow publishing, set `NPM_TOKEN` in repository secrets.
 
 ## Notes
 
